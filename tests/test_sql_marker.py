@@ -44,7 +44,7 @@ class TestSqlMarkerPytester:
             **{"tests/queries/simple": "SELECT * FROM orders WHERE amount > 50"},
         )
         pytester.makepyfile(
-            test_simple="""
+            test_simple="""\
             import pytest
 
             @pytest.mark.sql("tests/queries/simple.sql")
@@ -88,14 +88,13 @@ class TestSqlMarkerPytester:
             )},
         )
         pytester.makepyfile(
-            test_join="""
+            test_join="""\
             import pytest
 
             @pytest.mark.sql("tests/queries/join.sql")
             def test_join_works(sql_result):
                 assert sql_result is not None
-                rows = list(sql_result)
-                assert len(rows) == 2
+                assert len(sql_result) == 2
             """
         )
         result = pytester.runpytest("--no-header", "-v")
@@ -104,7 +103,7 @@ class TestSqlMarkerPytester:
     def test_missing_file_error(self, pytester: pytest.Pytester) -> None:
         """Missing SQL file should produce a clear error message."""
         pytester.makepyfile(
-            test_missing="""
+            test_missing="""\
             import pytest
 
             @pytest.mark.sql("tests/queries/missing.sql")

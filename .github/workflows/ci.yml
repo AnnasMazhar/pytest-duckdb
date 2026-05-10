@@ -37,7 +37,10 @@ jobs:
         run: ruff check src/ tests/
 
       - name: Test
-        run: pytest --cov=pytest_duckdb --cov-report=xml --cov-fail-under=80
+        run: |
+          coverage run -m pytest
+          coverage report --fail-under=80
+          coverage xml
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'

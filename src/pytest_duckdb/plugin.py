@@ -16,7 +16,7 @@ from typing import Any, Callable, Optional
 
 import pytest
 
-from .fixtures import load_csvs, read_sql_file
+from .fixtures import _parse_fixture_schemas, load_csvs, read_sql_file
 from .snapshot import compare, save
 
 
@@ -40,6 +40,14 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default="",
         help="DuckDB configuration as multiline ``key=value`` (optional); "
         "overridden by ``--duckdb-config`` CLI flags",
+    )
+    parser.addini(
+        "duckdb_fixture_schemas",
+        type="string",
+        default="",
+        help="Explicit column types for CSV fixtures as multiline "
+        "``table_name: col TYPE, ...`` (optional); prevents "
+        "non-deterministic ``read_csv_auto`` type inference",
     )
     group = parser.getgroup("duckdb")
     group.addoption(
@@ -114,6 +122,11 @@ def pytest_configure(config: pytest.Config) -> None:
     if db_config:
         config.duckdb_kwargs = {"config": db_config}
 
+    raw_schemas = config.getini("duckdb_fixture_schemas")
+    config.duckdb_fixture_schemas = (
+        _parse_fixture_schemas(raw_schemas) if isinstance(raw_schemas, str) else {}
+    )
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -138,7 +151,7 @@ def duckdb_session(request: pytest.FixtureRequest):
         request.config.duckdb_fixtures_dir,
         request.config.rootpath,
     )
-    load_csvs(conn, fixtures_dir)
+    load_csvs(conn, fixtures_dir, schemas=request.config.duckdb_fixture_schemas)
     yield conn
     conn.close()
 

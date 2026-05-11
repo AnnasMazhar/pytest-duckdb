@@ -34,6 +34,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default="tests/__snapshots__",
         help="Directory for Parquet snapshot files",
     )
+    parser.addini(
+        "duckdb_config",
+        type="string",
+        default="",
+        help="DuckDB configuration as multiline ``key=value`` (optional); "
+        "overridden by ``--duckdb-config`` CLI flags",
+    )
     group = parser.getgroup("duckdb")
     group.addoption(
         "--snapshot-update",
@@ -48,6 +55,36 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         metavar="PATH",
         help="Directory containing CSV fixture files (default: tests/fixtures)",
     )
+    group.addoption(
+        "--duckdb-config",
+        action="append",
+        type=str,
+        default=None,
+        metavar="KEY=VALUE",
+        dest="duckdb_config_cli",
+        help="DuckDB configuration option (may be repeated; "
+        "overrides ini-file ``duckdb_config`` on conflict)",
+    )
+
+
+def _resolve_duckdb_config(config: pytest.Config) -> dict[str, str]:
+    """Merge ini-file and CLI ``duckdb_config`` settings.
+
+    CLI values are parsed from ``--duckdb-config KEY=VALUE`` (repeated).
+    Ini values are parsed from a multiline ``duckdb_config`` key.
+    CLI values take precedence over ini values on key conflict.
+    """
+    merged: dict[str, str] = {}
+    # Read ini config first.
+    ini_raw = config.getini("duckdb_config")
+    if isinstance(ini_raw, str) and ini_raw.strip():
+        merged.update(_parse_duckdb_config(ini_raw))
+    # CLI overrides.
+    cli_raw = config.option.duckdb_config_cli
+    if cli_raw:
+        for item in cli_raw:
+            merged.update(_parse_duckdb_config(item))
+    return merged
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -72,6 +109,11 @@ def pytest_configure(config: pytest.Config) -> None:
         default="tests/__snapshots__",
     )
 
+    config.duckdb_kwargs = {}
+    db_config = _resolve_duckdb_config(config)
+    if db_config:
+        config.duckdb_kwargs = {"config": db_config}
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -91,7 +133,7 @@ def duckdb_session(request: pytest.FixtureRequest):
     """
     import duckdb
 
-    conn = duckdb.connect(":memory:")
+    conn = duckdb.connect(":memory:", **request.config.duckdb_kwargs)
     fixtures_dir = _resolve_path(
         request.config.duckdb_fixtures_dir,
         request.config.rootpath,
@@ -237,6 +279,23 @@ def _resolve_marker_path(marker: pytest.Mark, request: pytest.FixtureRequest) ->
     if not os.path.isabs(path):
         return os.path.join(str(request.config.rootpath), path)
     return path
+
+
+def _parse_duckdb_config(config_str: str) -> dict[str, str]:
+    """Parse a multiline ``key=value`` config string into a dict.
+
+    Blank lines and lines starting with ``#`` are ignored.  Keys and values
+    are stripped of leading/trailing whitespace.  If a value contains ``=``
+    the first ``=`` is treated as the delimiter.
+    """
+    result: dict[str, str] = {}
+    for line in config_str.split("\n"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, _, value = line.partition("=")
+        result[key.strip()] = value.strip()
+    return result
 
 
 def _module_name(node: pytest.Item) -> str:

@@ -33,11 +33,13 @@ class TestSqlMarkerPytester:
         pytester.mkdir("tests/queries")
         pytester.makefile(
             ".csv",
-            **{"tests/fixtures/orders": (
-                "id,customer_id,amount,created_at\n"
-                "1,1,25.50,2024-01-01\n"
-                "2,1,150.00,2024-01-02\n"
-            )},
+            **{
+                "tests/fixtures/orders": (
+                    "id,customer_id,amount,created_at\n"
+                    "1,1,25.50,2024-01-01\n"
+                    "2,1,150.00,2024-01-02\n"
+                )
+            },
         )
         pytester.makefile(
             ".sql",
@@ -71,21 +73,21 @@ class TestSqlMarkerPytester:
                     "3,2,75.00,2024-01-03\n"
                 ),
                 "tests/fixtures/customers": (
-                    "id,name,email\n"
-                    "1,Alice,alice@example.com\n"
-                    "2,Bob,bob@example.com\n"
+                    "id,name,email\n1,Alice,alice@example.com\n2,Bob,bob@example.com\n"
                 ),
             },
         )
         pytester.makefile(
             ".sql",
-            **{"tests/queries/join": (
-                "SELECT c.name, SUM(o.amount) as total\n"
-                "FROM orders o\n"
-                "JOIN customers c ON o.customer_id = c.id\n"
-                "GROUP BY c.name\n"
-                "ORDER BY total DESC"
-            )},
+            **{
+                "tests/queries/join": (
+                    "SELECT c.name, SUM(o.amount) as total\n"
+                    "FROM orders o\n"
+                    "JOIN customers c ON o.customer_id = c.id\n"
+                    "GROUP BY c.name\n"
+                    "ORDER BY total DESC"
+                )
+            },
         )
         pytester.makepyfile(
             test_join="""\

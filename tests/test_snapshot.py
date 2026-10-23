@@ -35,8 +35,7 @@ class TestSaveAndLoad:
         path = os.path.join(snap_dir, "test.parquet")
         conn = duckdb.connect(":memory:")
         conn.execute(
-            "CREATE TABLE data AS SELECT * FROM "
-            "(VALUES (1, 'a'), (2, 'b')) AS t(id, name)"
+            "CREATE TABLE data AS SELECT * FROM (VALUES (1, 'a'), (2, 'b')) AS t(id, name)"
         )
         result = conn.execute("SELECT * FROM data").fetchall()
         save(conn, QueryResult(result, ("id", "name")), path)
@@ -49,8 +48,7 @@ class TestSaveAndLoad:
         path = os.path.join(snap_dir, "test.parquet")
         conn = duckdb.connect(":memory:")
         conn.execute(
-            "CREATE TABLE data AS SELECT * FROM "
-            "(VALUES (1, 'a'), (2, 'b')) AS t(id, name)"
+            "CREATE TABLE data AS SELECT * FROM (VALUES (1, 'a'), (2, 'b')) AS t(id, name)"
         )
         result = conn.execute("SELECT * FROM data").fetchall()
         save(conn, QueryResult(result, ("id", "name")), path)
@@ -101,8 +99,7 @@ class TestCompare:
         path = os.path.join(snap_dir, "match.parquet")
         conn = duckdb.connect(":memory:")
         conn.execute(
-            "CREATE TABLE data AS SELECT * FROM "
-            "(VALUES (1, 'a'), (2, 'b')) AS t(id, name)"
+            "CREATE TABLE data AS SELECT * FROM (VALUES (1, 'a'), (2, 'b')) AS t(id, name)"
         )
         result = conn.execute("SELECT * FROM data").fetchall()
         save(conn, QueryResult(result, ("id", "name")), path)
@@ -115,8 +112,7 @@ class TestCompare:
         path = os.path.join(snap_dir, "mismatch.parquet")
         conn = duckdb.connect(":memory:")
         conn.execute(
-            "CREATE TABLE data AS SELECT * FROM "
-            "(VALUES (1, 'a'), (2, 'b')) AS t(id, name)"
+            "CREATE TABLE data AS SELECT * FROM (VALUES (1, 'a'), (2, 'b')) AS t(id, name)"
         )
         result = conn.execute("SELECT * FROM data").fetchall()
         save(conn, QueryResult(result, ("id", "name")), path)

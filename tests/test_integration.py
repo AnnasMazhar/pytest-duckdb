@@ -26,9 +26,7 @@ class TestFullWorkflow:
 
             # Connect and load.
             conn = duckdb.connect(":memory:")
-            conn.execute(
-                f"CREATE TABLE data AS SELECT * FROM read_csv_auto('{csv_path}')"
-            )
+            conn.execute(f"CREATE TABLE data AS SELECT * FROM read_csv_auto('{csv_path}')")
 
             # Run query.
             result = conn.execute("SELECT * FROM data WHERE val > 15").fetchall()
@@ -59,9 +57,7 @@ class TestFullWorkflow:
 
     def test_sql_snapshot_fixture_matches(self, duckdb_session, sql_snapshot) -> None:
         """Calling sql_snapshot twice with same data passes."""
-        result = duckdb_session.execute(
-            "SELECT id, amount FROM orders WHERE id = 1"
-        ).fetchall()
+        result = duckdb_session.execute("SELECT id, amount FROM orders WHERE id = 1").fetchall()
         from pytest_duckdb.snapshot import QueryResult
 
         # First call creates, second call compares
@@ -83,19 +79,14 @@ class TestIsolation:
 
     def test_isolation_first(self, duckdb_session) -> None:
         """First test: create a temp table."""
-        duckdb_session.execute(
-            "CREATE TEMP TABLE scratch AS SELECT 1 AS x"
-        )
-        count = duckdb_session.execute(
-            "SELECT COUNT(*) FROM scratch"
-        ).fetchone()[0]
+        duckdb_session.execute("CREATE TEMP TABLE scratch AS SELECT 1 AS x")
+        count = duckdb_session.execute("SELECT COUNT(*) FROM scratch").fetchone()[0]
         assert count == 1
 
     def test_isolation_second(self, duckdb_session) -> None:
         """Second test: scratch table should NOT exist (new session)."""
         tables = duckdb_session.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = 'main'"
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
         ).fetchall()
         names = {r[0] for r in tables}
         # No scratch table from the first test.
@@ -107,9 +98,7 @@ class TestEmptyResult:
 
     def test_empty_result(self, duckdb_session) -> None:
         """A SELECT with no matches returns 0 rows without error."""
-        result = duckdb_session.execute(
-            "SELECT * FROM orders WHERE 1 = 0"
-        ).fetchall()
+        result = duckdb_session.execute("SELECT * FROM orders WHERE 1 = 0").fetchall()
         assert len(result) == 0
 
 

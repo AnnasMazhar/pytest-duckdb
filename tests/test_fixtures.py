@@ -15,8 +15,7 @@ class TestCsvAutoLoad:
     def test_csv_auto_loaded(self, duckdb_session) -> None:
         """The ``orders`` table should exist after duckdb_session starts."""
         tables = duckdb_session.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = 'main'"
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
         ).fetchall()
         table_names = {r[0] for r in tables}
         assert "orders" in table_names, f"orders table not found: {table_names}"
@@ -33,12 +32,8 @@ class TestCsvAutoLoad:
 
     def test_correct_row_count(self, duckdb_session) -> None:
         """Orders CSV has 10 rows; customers has 5."""
-        assert duckdb_session.execute(
-            "SELECT COUNT(*) FROM orders"
-        ).fetchone()[0] == 10
-        assert duckdb_session.execute(
-            "SELECT COUNT(*) FROM customers"
-        ).fetchone()[0] == 5
+        assert duckdb_session.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 10
+        assert duckdb_session.execute("SELECT COUNT(*) FROM customers").fetchone()[0] == 5
 
     def test_type_inference(self, duckdb_session) -> None:
         """``amount`` should be inferred as a numeric type, not VARCHAR."""
@@ -48,11 +43,12 @@ class TestCsvAutoLoad:
         ).fetchall()
         assert len(types) == 1
         dtype = types[0][0]
-        assert "BIGINT" in dtype or "INT" in dtype or "DOUBLE" in dtype or (
-            "FLOAT" in dtype or "NUMERIC" in dtype or "DECIMAL" in dtype
-        ), (
-            f"amount has unexpected type: {dtype}"
-        )
+        assert (
+            "BIGINT" in dtype
+            or "INT" in dtype
+            or "DOUBLE" in dtype
+            or ("FLOAT" in dtype or "NUMERIC" in dtype or "DECIMAL" in dtype)
+        ), f"amount has unexpected type: {dtype}"
 
     def test_customers_loaded(self, duckdb_session) -> None:
         """Customers table should have the expected columns."""

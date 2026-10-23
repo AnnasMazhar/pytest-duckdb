@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pytest-duckdb"
-version = "0.1.0"
+version = "0.2.0"
 description = "pytest plugin for SQL pipeline testing with DuckDB — load fixtures, run queries, snapshot results"
 readme = "README.md"
 license = "MIT"
@@ -36,6 +36,8 @@ dev = [
     "pytest-cov>=5.0",
     "coverage>=7.0",
     "pandas>=2.0",
+    "bandit>=1.7.0",
+    "pip-audit>=2.7.0",
 ]
 
 [project.entry-points.pytest11]
@@ -69,4 +71,13 @@ exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",
     "except ImportError:",
+]
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+skips = ["B101"]
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.141.1",
 ]

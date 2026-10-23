@@ -8,6 +8,9 @@ stored snapshot and raise ``AssertionError`` with a clear diff on mismatch.
 from __future__ import annotations
 
 import os
+import uuid
+from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, List, Sequence
 
@@ -18,15 +21,24 @@ import duckdb
 # ---------------------------------------------------------------------------
 
 
+def _table_suffix() -> str:
+    """Return a unique suffix for temp table names (xdist-safe)."""
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "")
+    uid = uuid.uuid4().hex[:8]
+    return f"{worker}_{uid}" if worker else uid
+
+
 def save(conn: duckdb.DuckDBPyConnection, result: Any, path: str) -> None:
     """Save *result* (DataFrame or list-of-tuples) to a Parquet file.
 
     The parent directory is created if it does not exist.
     """
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    _register_temp(conn, result, "__snapshot_to_save__")
-    conn.execute(f"COPY __snapshot_to_save__ TO '{path}' (FORMAT PARQUET)")
-    conn.execute("DROP TABLE IF EXISTS __snapshot_to_save__")
+    suffix = _table_suffix()
+    tbl = f"__snapshot_save_{suffix}__"
+    _register_temp(conn, result, tbl)
+    conn.execute(f"COPY {tbl} TO ? (FORMAT PARQUET)", [path])
+    conn.execute(f"DROP TABLE IF EXISTS {tbl}")
 
 
 def load(conn: duckdb.DuckDBPyConnection, path: str) -> Any:
@@ -34,7 +46,7 @@ def load(conn: duckdb.DuckDBPyConnection, path: str) -> Any:
     :class:`QueryResult`."""
     if not os.path.isfile(path):
         raise FileNotFoundError(f"Snapshot file not found: {path}")
-    cur = conn.execute(f"SELECT * FROM read_parquet('{path}')")
+    cur = conn.execute("SELECT * FROM read_parquet(?)", [path])
     return _cursor_to_result(cur)
 
 
@@ -62,33 +74,35 @@ def compare(
             f"to create it first (expected: {path})"
         )
 
-    _register_temp(conn, actual, "__snapshot_actual__")
+    suffix = _table_suffix()
+    actual_tbl = f"__snapshot_actual_{suffix}__"
+    expected_tbl = f"__snapshot_expected_{suffix}__"
 
-    # Load the snapshot into a temp table for SQL-based comparison.
+    _register_temp(conn, actual, actual_tbl)
+
     conn.execute(
-        "CREATE TEMP TABLE __snapshot_expected__ AS "
-        f"SELECT * FROM read_parquet('{path}')"
+        f"CREATE TEMP TABLE {expected_tbl} AS SELECT * FROM read_parquet(?)",
+        [path],
     )
 
     try:
-        # 1. Column / type matching.
-        actual_cols = _describe(conn, "__snapshot_actual__")
-        expected_cols = _describe(conn, "__snapshot_expected__")
+        # 1. Column / type matching (order-independent).
+        actual_cols = _describe(conn, actual_tbl)
+        expected_cols = _describe(conn, expected_tbl)
 
-        if actual_cols != expected_cols:
+        actual_schema = {r[0]: r[1] for r in actual_cols}
+        expected_schema = {r[0]: r[1] for r in expected_cols}
+
+        if actual_schema != expected_schema:
             _raise_schema_diff(actual_cols, expected_cols)
 
-        # 2. Row-level comparison via EXCEPT.
+        # 2. Row-level comparison via EXCEPT ALL (NULL-safe, duplicate-aware).
         differing = conn.execute(
-            "SELECT * FROM __snapshot_actual__ "
-            "EXCEPT "
-            "SELECT * FROM __snapshot_expected__"
+            f"SELECT * FROM {actual_tbl} EXCEPT ALL SELECT * FROM {expected_tbl}"
         ).fetchall()
 
         missing = conn.execute(
-            "SELECT * FROM __snapshot_expected__ "
-            "EXCEPT "
-            "SELECT * FROM __snapshot_actual__"
+            f"SELECT * FROM {expected_tbl} EXCEPT ALL SELECT * FROM {actual_tbl}"
         ).fetchall()
 
         if differing or missing:
@@ -96,8 +110,8 @@ def compare(
             _raise_row_diff(differing, missing, col_names)
 
     finally:
-        conn.execute("DROP TABLE IF EXISTS __snapshot_actual__")
-        conn.execute("DROP TABLE IF EXISTS __snapshot_expected__")
+        conn.execute(f"DROP TABLE IF EXISTS {actual_tbl}")
+        conn.execute(f"DROP TABLE IF EXISTS {expected_tbl}")
 
 
 # ---------------------------------------------------------------------------
@@ -141,13 +155,16 @@ def _register_temp(conn: duckdb.DuckDBPyConnection, result: Any, name: str) -> N
     # If it has a `columns` attribute it's a QueryResult (list-of-tuples).
     if hasattr(result, "_rows"):
         rows = list(result)
+        columns = list(result.columns)
+        if not columns:
+            conn.execute(f"CREATE TEMP TABLE {name} AS SELECT 1 WHERE FALSE")
+            return
         if not rows:
-            columns = list(result.columns)
-            # Create an empty table with VARCHAR columns.
-            col_defs = ",\n".join(f'"{c}" VARCHAR' for c in columns)
-            conn.execute(f"CREATE TEMP TABLE {name} ({col_defs})")
+            # Empty result — save with proper column schema via UNION trick.
+            col_defs = ", ".join(f'NULL::VARCHAR AS "{c}"' for c in columns)
+            conn.execute(f"CREATE TEMP TABLE {name} AS SELECT {col_defs} WHERE FALSE")
         else:
-            _register_tuple_list(conn, rows, list(result.columns), name)
+            _register_tuple_list(conn, rows, columns, name)
         return
 
     # Check for pandas DataFrame.
@@ -163,10 +180,10 @@ def _register_temp(conn: duckdb.DuckDBPyConnection, result: Any, name: str) -> N
     # Fallback: treat as list-of-tuples with no column metadata.
     if isinstance(result, (list, tuple)):
         rows = list(result)
-        if rows:
-            cols = [f"col{i}" for i in range(len(rows[0]))]
-        else:
-            cols = []
+        if not rows:
+            conn.execute(f"CREATE TEMP TABLE {name} AS SELECT 1 WHERE FALSE")
+            return
+        cols = [f"col{i}" for i in range(len(rows[0]))]
         _register_tuple_list(conn, rows, cols, name)
         return
 
@@ -183,12 +200,19 @@ def _register_tuple_list(
     """Create a temp table from a list of Python tuples, preserving types."""
     col_list = ", ".join(f'"{c}"' for c in columns)
     quoted = ", ".join("?" for _ in columns)
-    head = rows[0]
 
-    # Let DuckDB infer types from the first row.
-    placeholders = "(" + ", ".join(
-        _py_value_repr(v) for v in head
-    ) + ")"
+    # Find a representative value per column (first non-None) for type inference.
+    ncols = len(columns)
+    rep = [None] * ncols
+    for row in rows:
+        for i in range(ncols):
+            if rep[i] is None and row[i] is not None:
+                rep[i] = row[i]
+        if all(v is not None for v in rep):
+            break
+
+    # Build VALUES row for type inference.
+    placeholders = "(" + ", ".join(_py_value_repr(v) for v in rep) + ")"
     conn.execute(
         f"CREATE TEMP TABLE {name} AS "
         f"SELECT * FROM (VALUES {placeholders}) AS t ({col_list}) WHERE FALSE"
@@ -200,17 +224,30 @@ def _register_tuple_list(
 
 
 def _py_value_repr(val: Any) -> str:
-    """Return a DuckDB-compatible literal for a Python value."""
+    """Return a DuckDB-compatible literal for a Python value (type inference only)."""
     if val is None:
         return "NULL"
     if isinstance(val, bool):
         return "TRUE" if val else "FALSE"
-    if isinstance(val, (int, float)):
+    if isinstance(val, int):
         return str(val)
+    if isinstance(val, float):
+        return f"{val}::DOUBLE"
+    if isinstance(val, Decimal):
+        return str(val)
+    if isinstance(val, datetime):
+        return f"TIMESTAMP '{val.isoformat()}'"
+    if isinstance(val, date):
+        return f"DATE '{val.isoformat()}'"
+    if isinstance(val, bytes):
+        hex_str = val.hex()
+        return f"'\\x{hex_str}'::BLOB"
     if isinstance(val, str):
-        escaped = val.replace("'", "''")
+        escaped = val.replace("'", "''").replace("\x00", "")
         return f"'{escaped}'"
-    return f"'{val}'"
+    # Fallback: cast str repr safely
+    escaped = str(val).replace("'", "''")
+    return f"'{escaped}'::VARCHAR"
 
 
 def _cursor_to_result(cur: duckdb.DuckDBPyConnection) -> Any:
@@ -237,7 +274,7 @@ def _raise_schema_diff(
     """Raise ``AssertionError`` with a schema diff message."""
     actual_map = {r[0]: r[1] for r in actual}
     expected_map = {r[0]: r[1] for r in expected}
-    lines: list[str] = []
+    lines: list = []
 
     for col in sorted(set(list(actual_map) + list(expected_map))):
         a_type = actual_map.get(col, "<missing>")
@@ -255,7 +292,7 @@ def _raise_row_diff(
     col_names: List[str],
 ) -> None:
     """Raise ``AssertionError`` with a row-level diff message."""
-    lines: list[str] = []
+    lines: list = []
     if differing:
         lines.append(f"Rows in actual but not expected ({len(differing)}):")
         for row in differing[:10]:

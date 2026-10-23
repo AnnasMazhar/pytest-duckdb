@@ -1,4 +1,4 @@
-"""CSV fixture loading — reads CSV files from a directory into DuckDB tables."""
+"""Fixture loading — reads CSV/Parquet/JSON files from a directory into DuckDB tables."""
 
 from __future__ import annotations
 
@@ -6,6 +6,12 @@ import os
 from pathlib import Path
 
 import duckdb
+
+_LOADERS = {
+    ".csv": "read_csv_auto(?)",
+    ".parquet": "read_parquet(?)",
+    ".json": "read_json_auto(?)",
+}
 
 
 def _parse_fixture_schemas(schemas_str: str) -> dict[str, list[tuple[str, str]]]:
@@ -67,50 +73,55 @@ def _parse_fixture_schemas(schemas_str: str) -> dict[str, list[tuple[str, str]]]
     return result
 
 
-def load_csvs(
+def load_fixtures(
     conn: duckdb.DuckDBPyConnection,
     fixtures_dir: str,
     schemas: dict[str, list[tuple[str, str]]] | None = None,
 ) -> None:
-    """Load all CSV files from *fixtures_dir* as DuckDB tables.
+    """Load all supported fixture files from *fixtures_dir* as DuckDB tables.
 
-    Each CSV file becomes a table named after its stem (filename without extension).
-    Uses ``read_csv_auto`` for schema inference.  Non-existent directories are
-    silently ignored so that tests without fixtures work out of the box.
+    Supported formats: CSV, Parquet, JSON.
+    Each file becomes a table named after its stem (filename without extension).
+    Non-existent directories are silently ignored.
 
     When *schemas* contains an entry for a table, the explicit column types
-    are used instead of ``read_csv_auto`` inference, ensuring deterministic
-    types across platforms and DuckDB versions.
+    are used instead of inference, ensuring deterministic types across
+    platforms and DuckDB versions.
 
     Args:
         conn: An open DuckDB connection.
-        fixtures_dir: Absolute or project-relative path to the CSV directory.
+        fixtures_dir: Absolute or project-relative path to the fixtures directory.
         schemas: Optional mapping of ``{table_name: [(col_name, type), ...]}``.
     """
     path = Path(fixtures_dir)
     if not path.is_dir():
         return
 
-    csv_files = sorted(path.glob("*.csv"))
-    for csv_file in csv_files:
-        table_name = csv_file.stem
-        col_schema = (schemas or {}).get(table_name)
-        if col_schema:
-            col_names = [f'"{col_name}"' for col_name, _ in col_schema]
-            col_defs = ", ".join(
-                f'"{col_name}" {type_name}' for col_name, type_name in col_schema
-            )
-            select_cols = ", ".join(col_names)
-            conn.execute(f'CREATE TABLE "{table_name}" ({col_defs})')
-            conn.execute(
-                f'INSERT INTO "{table_name}" ({select_cols}) '
-                f"SELECT {select_cols} FROM read_csv_auto('{csv_file}')"
-            )
-        else:
-            conn.execute(
-                f'CREATE TABLE "{table_name}" AS '
-                f"SELECT * FROM read_csv_auto('{csv_file}')"
-            )
+    for ext, reader in _LOADERS.items():
+        for file in sorted(path.glob(f"*{ext}")):
+            table_name = file.stem
+            col_schema = (schemas or {}).get(table_name)
+            if col_schema:
+                col_names = [f'"{col_name}"' for col_name, _ in col_schema]
+                col_defs = ", ".join(
+                    f'"{col_name}" {type_name}' for col_name, type_name in col_schema
+                )
+                select_cols = ", ".join(col_names)
+                conn.execute(f'CREATE TABLE "{table_name}" ({col_defs})')
+                conn.execute(
+                    f'INSERT INTO "{table_name}" ({select_cols}) '
+                    f"SELECT {select_cols} FROM {reader}",
+                    [str(file)],
+                )
+            else:
+                conn.execute(
+                    f'CREATE TABLE "{table_name}" AS SELECT * FROM {reader}',
+                    [str(file)],
+                )
+
+
+# Keep backward-compatible alias
+load_csvs = load_fixtures
 
 
 def read_sql_file(path: str) -> str:

@@ -28,6 +28,17 @@ def _table_suffix() -> str:
     return f"{worker}_{uid}" if worker else uid
 
 
+def _quote_ident(name: str) -> str:
+    """Return *name* quoted as a safe SQL identifier.
+
+    Table and column names cannot be parameterised, so they are quoted and
+    embedded as double-quoted identifiers with any embedded quote doubled.
+    """
+    if not isinstance(name, str) or not name:
+        raise ValueError(f"Invalid SQL identifier: {name!r}")
+    return '"' + name.replace('"', '""') + '"'
+
+
 def save(conn: duckdb.DuckDBPyConnection, result: Any, path: str) -> None:
     """Save *result* (DataFrame or list-of-tuples) to a Parquet file.
 
@@ -81,7 +92,8 @@ def compare(
     _register_temp(conn, actual, actual_tbl)
 
     conn.execute(
-        f"CREATE TEMP TABLE {expected_tbl} AS SELECT * FROM read_parquet(?)",
+        f"CREATE TEMP TABLE {_quote_ident(expected_tbl)} AS "  # nosec B608
+        f"SELECT * FROM read_parquet(?)",
         [path],
     )
 
@@ -98,11 +110,13 @@ def compare(
 
         # 2. Row-level comparison via EXCEPT ALL (NULL-safe, duplicate-aware).
         differing = conn.execute(
-            f"SELECT * FROM {actual_tbl} EXCEPT ALL SELECT * FROM {expected_tbl}"
+            f"SELECT * FROM {_quote_ident(actual_tbl)} "  # nosec B608
+            f"EXCEPT ALL SELECT * FROM {_quote_ident(expected_tbl)}"
         ).fetchall()
 
         missing = conn.execute(
-            f"SELECT * FROM {expected_tbl} EXCEPT ALL SELECT * FROM {actual_tbl}"
+            f"SELECT * FROM {_quote_ident(expected_tbl)} "  # nosec B608
+            f"EXCEPT ALL SELECT * FROM {_quote_ident(actual_tbl)}"
         ).fetchall()
 
         if differing or missing:
@@ -110,8 +124,8 @@ def compare(
             _raise_row_diff(differing, missing, col_names)
 
     finally:
-        conn.execute(f"DROP TABLE IF EXISTS {actual_tbl}")
-        conn.execute(f"DROP TABLE IF EXISTS {expected_tbl}")
+        conn.execute(f"DROP TABLE IF EXISTS {_quote_ident(actual_tbl)}")  # nosec B608
+        conn.execute(f"DROP TABLE IF EXISTS {_quote_ident(expected_tbl)}")  # nosec B608
 
 
 # ---------------------------------------------------------------------------
@@ -157,12 +171,14 @@ def _register_temp(conn: duckdb.DuckDBPyConnection, result: Any, name: str) -> N
         rows = list(result)
         columns = list(result.columns)
         if not columns:
-            conn.execute(f"CREATE TEMP TABLE {name} AS SELECT 1 WHERE FALSE")
+            conn.execute(f"CREATE TEMP TABLE {_quote_ident(name)} AS SELECT 1 WHERE FALSE")  # nosec B608
             return
         if not rows:
             # Empty result — save with proper column schema via UNION trick.
-            col_defs = ", ".join(f'NULL::VARCHAR AS "{c}"' for c in columns)
-            conn.execute(f"CREATE TEMP TABLE {name} AS SELECT {col_defs} WHERE FALSE")
+            col_defs = ", ".join(f"NULL::VARCHAR AS {_quote_ident(c)}" for c in columns)
+            conn.execute(
+                f"CREATE TEMP TABLE {_quote_ident(name)} AS SELECT {col_defs} WHERE FALSE"  # nosec B608
+            )
         else:
             _register_tuple_list(conn, rows, columns, name)
         return
@@ -181,14 +197,14 @@ def _register_temp(conn: duckdb.DuckDBPyConnection, result: Any, name: str) -> N
     if isinstance(result, (list, tuple)):
         rows = list(result)
         if not rows:
-            conn.execute(f"CREATE TEMP TABLE {name} AS SELECT 1 WHERE FALSE")
+            conn.execute(f"CREATE TEMP TABLE {_quote_ident(name)} AS SELECT 1 WHERE FALSE")  # nosec B608
             return
         cols = [f"col{i}" for i in range(len(rows[0]))]
         _register_tuple_list(conn, rows, cols, name)
         return
 
     # DuckDB-compatible type (e.g. a relation).
-    conn.execute(f"CREATE TEMP TABLE {name} AS SELECT * FROM result")
+    conn.execute(f"CREATE TEMP TABLE {_quote_ident(name)} AS SELECT * FROM result")  # nosec B608
 
 
 def _register_tuple_list(
@@ -198,7 +214,7 @@ def _register_tuple_list(
     name: str,
 ) -> None:
     """Create a temp table from a list of Python tuples, preserving types."""
-    col_list = ", ".join(f'"{c}"' for c in columns)
+    col_list = ", ".join(_quote_ident(c) for c in columns)
     quoted = ", ".join("?" for _ in columns)
 
     # Find a representative value per column (first non-None) for type inference.
@@ -214,11 +230,11 @@ def _register_tuple_list(
     # Build VALUES row for type inference.
     placeholders = "(" + ", ".join(_py_value_repr(v) for v in rep) + ")"
     conn.execute(
-        f"CREATE TEMP TABLE {name} AS "
+        f"CREATE TEMP TABLE {_quote_ident(name)} AS "  # nosec B608
         f"SELECT * FROM (VALUES {placeholders}) AS t ({col_list}) WHERE FALSE"
     )
     conn.executemany(
-        f"INSERT INTO {name} ({col_list}) VALUES ({quoted})",
+        f"INSERT INTO {_quote_ident(name)} ({col_list}) VALUES ({quoted})",  # nosec B608
         rows,
     )
 

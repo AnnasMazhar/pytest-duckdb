@@ -42,10 +42,7 @@ class TestParseDuckdbConfig:
     def test_comment_lines_ignored(self) -> None:
         """Lines starting with ``#`` are ignored."""
         result = _parse_duckdb_config(
-            "# this is a comment\n"
-            "default_order=desc\n"
-            "  # indented comment\n"
-            "threads=2\n"
+            "# this is a comment\ndefault_order=desc\n  # indented comment\nthreads=2\n"
         )
         assert result == {"default_order": "desc", "threads": "2"}
 
@@ -63,9 +60,7 @@ class TestParseDuckdbConfig:
 class TestResolveDuckdbConfig:
     """Tests for the ini+CLI merge logic."""
 
-    def _make_config(
-        self, ini_value: str = "", cli_value: list[str] | None = None
-    ) -> Mock:
+    def _make_config(self, ini_value: str = "", cli_value: list[str] | None = None) -> Mock:
         config = Mock(spec=["getini", "option"])
         config.getini.return_value = ini_value
         config.option.duckdb_config_cli = cli_value
@@ -73,17 +68,13 @@ class TestResolveDuckdbConfig:
 
     def test_ini_only(self) -> None:
         """Config from ini is returned when no CLI flags are given."""
-        config = self._make_config(
-            ini_value="default_order=desc\nthreads=4"
-        )
+        config = self._make_config(ini_value="default_order=desc\nthreads=4")
         result = _resolve_duckdb_config(config)
         assert result == {"default_order": "desc", "threads": "4"}
 
     def test_cli_only(self) -> None:
         """Config from CLI flags works."""
-        config = self._make_config(
-            cli_value=["default_order=desc", "memory_limit=2GB"]
-        )
+        config = self._make_config(cli_value=["default_order=desc", "memory_limit=2GB"])
         result = _resolve_duckdb_config(config)
         assert result == {"default_order": "desc", "memory_limit": "2GB"}
 
@@ -124,7 +115,8 @@ class TestDuckdbConfigIntegration:
             """,
         )
         result = pytester.runpytest_subprocess(
-            "--duckdb-config", "default_order=desc",
+            "--duckdb-config",
+            "default_order=desc",
             "-v",
         )
         result.assert_outcomes(passed=1)
@@ -156,7 +148,8 @@ class TestDuckdbConfigIntegration:
             """,
         )
         result = pytester.runpytest_subprocess(
-            "--duckdb-config", "default_order=desc",
+            "--duckdb-config",
+            "default_order=desc",
             "--override-ini=duckdb_config=\ndefault_order=asc\nthreads=2",
             "-v",
         )

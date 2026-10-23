@@ -42,8 +42,7 @@ class TestParseFixtureSchemas:
     def test_multiple_tables(self) -> None:
         """Multiple tables, one per line."""
         result = _parse_fixture_schemas(
-            "orders: order_id INTEGER, amount DOUBLE\n"
-            "customers: id INTEGER, name VARCHAR"
+            "orders: order_id INTEGER, amount DOUBLE\ncustomers: id INTEGER, name VARCHAR"
         )
         assert result == {
             "orders": [("order_id", "INTEGER"), ("amount", "DOUBLE")],
@@ -52,36 +51,24 @@ class TestParseFixtureSchemas:
 
     def test_whitespace_tolerant(self) -> None:
         """Extra whitespace around table name and columns is tolerated."""
-        result = _parse_fixture_schemas(
-            "  orders  :  order_id  INTEGER ,  amount  DOUBLE  "
-        )
-        assert result == {
-            "orders": [("order_id", "INTEGER"), ("amount", "DOUBLE")]
-        }
+        result = _parse_fixture_schemas("  orders  :  order_id  INTEGER ,  amount  DOUBLE  ")
+        assert result == {"orders": [("order_id", "INTEGER"), ("amount", "DOUBLE")]}
 
     def test_comment_lines_ignored(self) -> None:
         """Lines starting with ``#`` are ignored."""
         result = _parse_fixture_schemas(
-            "# this is a comment\n"
-            "orders: id INTEGER\n"
-            "  # indented comment\n"
+            "# this is a comment\norders: id INTEGER\n  # indented comment\n"
         )
         assert result == {"orders": [("id", "INTEGER")]}
 
     def test_table_name_with_underscore(self) -> None:
         """Table names with underscores are handled."""
-        result = _parse_fixture_schemas(
-            "order_items: id INTEGER, product_name VARCHAR"
-        )
-        assert result == {
-            "order_items": [("id", "INTEGER"), ("product_name", "VARCHAR")]
-        }
+        result = _parse_fixture_schemas("order_items: id INTEGER, product_name VARCHAR")
+        assert result == {"order_items": [("id", "INTEGER"), ("product_name", "VARCHAR")]}
 
     def test_type_with_parameters(self) -> None:
         """Types with parameters (e.g. VARCHAR(255)) are handled."""
-        result = _parse_fixture_schemas(
-            "users: name VARCHAR(255), score DECIMAL(10,2)"
-        )
+        result = _parse_fixture_schemas("users: name VARCHAR(255), score DECIMAL(10,2)")
         assert result == {
             "users": [
                 ("name", "VARCHAR(255)"),
@@ -116,9 +103,7 @@ class TestLoadCsvsWithSchemas:
         schemas = {"items": [("value", "VARCHAR")]}
         load_csvs(conn, csv_dir, schemas=schemas)
 
-        rows = conn.execute(
-            "SELECT typeof(value) AS t, value FROM items ORDER BY value"
-        ).fetchall()
+        rows = conn.execute("SELECT typeof(value) AS t, value FROM items ORDER BY value").fetchall()
         conn.close()
 
         assert len(rows) == 3
@@ -175,9 +160,7 @@ class TestLoadCsvsWithSchemas:
         conn.close()
 
         assert nums_type[0] == "VARCHAR", f"Expected VARCHAR, got {nums_type[0]}"
-        assert labels_type[0] == "VARCHAR", (
-            f"Expected VARCHAR, got {labels_type[0]}"
-        )
+        assert labels_type[0] == "VARCHAR", f"Expected VARCHAR, got {labels_type[0]}"
 
     def test_multiple_tables_with_schemas(self, tmp_path: str) -> None:
         """Multiple tables each get their own explicit schema."""
@@ -229,9 +212,7 @@ class TestFixtureSchemasPytester:
         result = pytester.runpytest_subprocess("-v")
         result.assert_outcomes(passed=1)
 
-    def test_schema_prevents_timestamp_mismatch(
-        self, pytester: pytest.Pytester
-    ) -> None:
+    def test_schema_prevents_timestamp_mismatch(self, pytester: pytest.Pytester) -> None:
         """Explicit type prevents date-like strings being inferred as DATE."""
         pytester.makefile(
             ".csv",

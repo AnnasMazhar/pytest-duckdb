@@ -23,13 +23,13 @@ class TestSnapshotDirectoryPermission:
     def test_save_to_readonly_dir_raises(self, snap_dir):
         path = os.path.join(snap_dir, "readonly", "snap.parquet")
         os.makedirs(os.path.dirname(path))
-        os.chmod(os.path.dirname(path), 0o555)
+        os.chmod(os.path.dirname(path), 0o500)
         conn = duckdb.connect(":memory:")
         try:
             with pytest.raises((PermissionError, OSError, duckdb.IOException)):
                 save(conn, QueryResult([(1,)], ("x",)), path)
         finally:
-            os.chmod(os.path.dirname(path), 0o755)
+            os.chmod(os.path.dirname(path), 0o700)
             conn.close()
 
 

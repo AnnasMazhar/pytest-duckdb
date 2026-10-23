@@ -7,6 +7,8 @@ from pathlib import Path
 
 import duckdb
 
+from .snapshot import _quote_ident
+
 _LOADERS = {
     ".csv": "read_csv_auto(?)",
     ".parquet": "read_parquet(?)",
@@ -102,20 +104,21 @@ def load_fixtures(
             table_name = file.stem
             col_schema = (schemas or {}).get(table_name)
             if col_schema:
-                col_names = [f'"{col_name}"' for col_name, _ in col_schema]
+                col_names = [_quote_ident(col_name) for col_name, _ in col_schema]
                 col_defs = ", ".join(
-                    f'"{col_name}" {type_name}' for col_name, type_name in col_schema
+                    f"{_quote_ident(col_name)} {type_name}" for col_name, type_name in col_schema
                 )
                 select_cols = ", ".join(col_names)
-                conn.execute(f'CREATE TABLE "{table_name}" ({col_defs})')
+                conn.execute(f"CREATE TABLE {_quote_ident(table_name)} ({col_defs})")  # nosec B608
                 conn.execute(
-                    f'INSERT INTO "{table_name}" ({select_cols}) '
-                    f"SELECT {select_cols} FROM {reader}",
+                    f"INSERT INTO {_quote_ident(table_name)} ({select_cols}) "  # nosec B608
+                    f"SELECT {select_cols} FROM {reader}",  # nosec B608
                     [str(file)],
                 )
             else:
                 conn.execute(
-                    f'CREATE TABLE "{table_name}" AS SELECT * FROM {reader}',
+                    f"CREATE TABLE {_quote_ident(table_name)} "  # nosec B608
+                    f"AS SELECT * FROM {reader}",
                     [str(file)],
                 )
 
